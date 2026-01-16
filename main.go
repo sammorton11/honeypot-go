@@ -7,7 +7,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"sync"
 )
 
 type Attempt struct {
@@ -16,16 +15,8 @@ type Attempt struct {
 	Message string `json:"message"`
 }
 
-var m sync.Mutex
-
 func main() {
-	// List
-	/* c, err := net.ListenIP("ip4:tcp", &net.IPAddr{IP: net.ParseIP("0.0.0.0")}) // fake SSH port
-	if err != nil {
-		log.Fatal(err)
-	} */
-
-	listen, err := net.Listen("tcp", ":2222")
+	listener, err := net.Listen("tcp", ":2222")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -33,11 +24,8 @@ func main() {
 	fmt.Println("honeypot listening on :2222")
 	fmt.Println("try: nc localhost 2222")
 
-	/* 	_lookUp := make(map[string][]byte) */
-	lookUp := make(map[string]Attempt)
-
 	for {
-		c, err := listen.Accept()
+		c, err := listener.Accept()
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -53,32 +41,29 @@ func main() {
 		go func(c net.Conn) {
 			// read whatever they send (login attempts, etc)
 			buf := make([]byte, 1024)
+
+			// Infinite loop
 			for {
 				// read data from the connection
 				n, err := c.Read(buf)
 				if err != nil {
 					break
 				}
+
+				// Package data into an object
 				attempt := Attempt{
 					Network: userNetwork,
 					Address: userAddr,
 					Message: string(buf[:n]),
 				}
 
-/* 				hash := rand.Text() */
-
-				// buffer has data from client -- add to lookup table
-				// Or do i .. push to a channel?
-				// Replace this with an http request to localhost:8080/attempt
-				/* m.Lock()
-				lookUp[hash] = attempt
-				m.Unlock() */
-
+				// Serialize 
 				jsonData, err := json.Marshal(attempt)
 				if err != nil {
 					fmt.Println("Error marshaling attempt to rest server", err)
 				}
 
+				// Send over the wire to proxy server to store in db
 				req, err := http.Post("http://localhost:8080/attempt", "application/json", bytes.NewBuffer(jsonData))
 				if err != nil {
 					fmt.Println("Error sending attempt to rest server", err)
@@ -86,13 +71,12 @@ func main() {
 				}
 				defer req.Body.Close()
 
+				// Log info
 				fmt.Printf("Network: %s\n", attempt.Network)
 				fmt.Printf("Address: %s\n", attempt.Address)
 				fmt.Printf("Buffer: %v\n", attempt.Message)
-				for v := range lookUp {
-					fmt.Printf("Attempt: %v\n", v)
-				}
 			}
+			// Close that damn connection
 			c.Close()
 		}(c)
 	}
